@@ -1,0 +1,77 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --radius: 0.5rem;
+  --background: #0a1628;
+  --surface: #111f38;
+  --surface-muted: #0e1a30;
+  --border: #1e3358;
+  --amber: #f5a623;
+  --text-primary: #e8edf5;
+  --text-muted: #7a93b8;
+  --text-mono: #9ab0cf;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background-color: var(--background);
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  min-width: 1280px;
+  overflow-x: hidden;
+}
+
+/* MapLibre overrides */
+.maplibregl-ctrl-attrib {
+  background: rgba(10, 22, 40, 0.8) !important;
+  color: var(--text-muted) !important;
+}
+
+.maplibregl-ctrl-attrib a {
+  color: var(--text-muted) !important;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: var(--surface-muted);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
+}
+
+/* Pulse animation for user location dot */
+@keyframes pulse-ring {
+  0% { transform: scale(0.8); opacity: 1; }
+  100% { transform: scale(2.5); opacity: 0; }
+}
+
+.pulse-ring {
+  animation: pulse-ring 2s ease-out infinite;
+}
+
+/* AI copilot pulse */
+@keyframes ai-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.ai-pulse {
+  animation: ai-pulse 2s ease-in-out infinite;
+}
+
+/* Framer Motion override for map transitions */
+.map-panel {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+}
