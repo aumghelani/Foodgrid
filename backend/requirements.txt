@@ -19,6 +19,11 @@ shapely==2.*
 numpy>=2,<3
 pandas==2.*
 
+# Shapefile → GeoJSON conversion (convert_shapefile.py)
+# Uses pure-Python libs — no GDAL/fiona/geopandas required on Windows.
+pyshp==3.*
+pyproj==3.*
+
 # Geocoding (Nominatim / OpenStreetMap — no API key required)
 geopy==2.*
 

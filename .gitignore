@@ -9,3 +9,10 @@ dist-ssr/
 Thumbs.db
 *.local
 backend/nul
+
+# Shapefile source data — large binary files, do not commit
+backend/tl_2023_25_tract/
+backend/data/*.geojson
+
+# Keep the processed frontend GeoJSON (build artifact, should be committed)
+!src/data/boston_tracts.geojson

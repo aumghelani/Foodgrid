@@ -60,6 +60,8 @@ export function useMapInteraction(
       const map = mapRef.current?.getMap()
       if (!map) return
 
+      if (!map.getLayer('tract-fill')) return
+
       const features = map.queryRenderedFeatures(e.point, { layers: ['tract-fill'] })
 
       if (!features.length) {
@@ -128,6 +130,7 @@ export function useMapInteraction(
       const map = mapRef.current?.getMap()
       if (!map) return
 
+      if (!map.getLayer('tract-fill')) return
       const features = map.queryRenderedFeatures(e.point, { layers: ['tract-fill'] })
       if (!features.length) return
 

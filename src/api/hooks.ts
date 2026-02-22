@@ -10,7 +10,7 @@
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { apiFetch } from './client'
 import { BOSTON_TRACTS, cityStats as staticCityStats } from '../data/censusTracts'
-import type { TractFeatureCollection } from '../types/map'
+import type { TractFeatureCollection, TractProperties } from '../types/map'
 import type { FrontendFoodResource, BackendFoodResource, BackendResourceType, FrontendResourceType } from '../types/resources'
 import type { CityStats } from '../types/stats'
 import type { SimulationResult } from '../types/simulation'
@@ -98,15 +98,34 @@ export function useResources(params: ResourceParams) {
 }
 
 /**
- * All census tracts as GeoJSON FeatureCollection.
- * Falls back to static BOSTON_TRACTS while loading or on error.
+ * All census tracts as a GeoJSON FeatureCollection.
+ *
+ * BOSTON_TRACTS (from the TIGER/Line shapefile) is the authoritative source of
+ * geometry — the backend's geometry may differ. We always keep the static
+ * geometry and overlay live risk-score properties from the backend API when a
+ * matching tract_id is found. This guarantees 235 real Boston shapes always
+ * render, with live MongoDB scores merged in on top.
  */
 export function useTracts() {
   return useQuery<TractFeatureCollection>({
-    queryKey:        ['tracts'],
-    queryFn:         () => apiFetch<TractFeatureCollection>('tracts/'),
+    queryKey: ['tracts'],
+    queryFn: async () => {
+      const apiData = await apiFetch<TractFeatureCollection>('tracts/')
+      // Build a lookup of live properties keyed by tract_id
+      const liveByTractId = new Map<string, TractProperties>(
+        apiData.features.map((f) => [f.properties.tract_id, f.properties])
+      )
+      // Overlay backend risk scores onto BOSTON_TRACTS real geometry
+      return {
+        ...BOSTON_TRACTS,
+        features: BOSTON_TRACTS.features.map((f) => {
+          const live = liveByTractId.get(f.properties.tract_id)
+          return live ? { ...f, properties: { ...f.properties, ...live } } : f
+        }),
+      }
+    },
     placeholderData: BOSTON_TRACTS,
-    staleTime:       5 * 60_000,
+    staleTime: 5 * 60_000,
   })
 }
 

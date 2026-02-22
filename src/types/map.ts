@@ -26,6 +26,12 @@ export interface TractProperties {
   /** Fraction of households receiving SNAP benefits (0.0–1.0). */
   snap_rate: number
   population: number
+  /** Composite vulnerability index (0.0–1.0). Higher = more vulnerable. */
+  vulnerability_index: number
+  /** Composite food need score (0.0–1.0). Higher = greater unmet need. */
+  need_score: number
+  /** Food supply adequacy score (0.0–1.0). Higher = better supply. */
+  supply_score: number
 }
 
 /**
