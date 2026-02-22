@@ -1,13 +1,11 @@
 import { useState } from 'react'
 import { MapPin, Search, Volume2, Train } from 'lucide-react'
-import { useMapStore } from '../../store/useMapStore'
+import { useMapStore, DEFAULT_USER_LOCATION } from '../../store/useMapStore'
 import { useResources } from '../../api/hooks'
 import type { ResourceFilter, ServiceFilter } from '../../types'
 import type { FrontendFoodResource } from '../../types/resources'
 
-// Default origin: Boston City Hall — used for distance estimates until
-// the user enters their own address (geocoding not yet implemented).
-const BOSTON_CENTER = { lat: 42.3601, lng: -71.0589 }
+const BOSTON_CENTER = { lat: DEFAULT_USER_LOCATION.lat, lng: DEFAULT_USER_LOCATION.lng }
 
 const RESOURCE_FILTERS: { key: ResourceFilter; label: string }[] = [
   { key: 'pantry', label: 'Pantries' },
@@ -36,6 +34,8 @@ const resourceLabels: Record<string, string> = {
   mobile:         'Mobile',
 }
 
+const MAX_TIME_OPTIONS = [15, 30, 45] as const
+
 export default function ResidentSidebar() {
   const {
     activeResourceFilters,
@@ -44,19 +44,23 @@ export default function ResidentSidebar() {
     toggleServiceFilter,
     travelTimeLimit,
     setTravelTimeLimit,
+    timeWeight,
+    setTimeWeight,
   } = useMapStore()
 
-  // Local state for the slider display value — prevents API re-fetch on
-  // every tick. The store (and thus the query) only updates on mouse/touch up.
-  const [sliderDisplay, setSliderDisplay] = useState(travelTimeLimit)
+  // Local slider display — prevents API re-fetch on every tick
+  const [sliderDisplay, setSliderDisplay] = useState(timeWeight)
 
-  // Fetch resources from the API with active filters applied server-side.
+  const costWeight = 100 - timeWeight
+
   const { data: allResources = [], isLoading, isError, refetch } = useResources({
     types:          activeResourceFilters,
     serviceFilters: activeServiceFilters,
     lat:            BOSTON_CENTER.lat,
     lng:            BOSTON_CENTER.lng,
     maxMinutes:     travelTimeLimit,
+    timeWeight,
+    costWeight,
   })
 
   const results = allResources.slice(0, 6)
@@ -69,7 +73,7 @@ export default function ResidentSidebar() {
           <MapPin className="w-4 h-4 text-[#f5a623] flex-shrink-0" />
           <input
             type="text"
-            defaultValue="Roxbury, Boston MA"
+            defaultValue={DEFAULT_USER_LOCATION.address}
             className="flex-1 bg-transparent text-sm text-white placeholder:text-[#7a93b8] outline-none font-sans"
             placeholder="Enter your address…"
           />
@@ -122,25 +126,49 @@ export default function ResidentSidebar() {
         </div>
       </div>
 
-      {/* Travel Time Slider */}
-      <div className="px-4 py-4 border-b border-[#1e3358]">
-        <div className="flex items-center justify-between mb-3">
-          <p className="font-mono text-[11px] text-[#7a93b8] uppercase tracking-wider">
-            Max travel time (MBTA)
-          </p>
-          <span className="font-mono text-sm font-medium text-[#f5a623]">
-            {sliderDisplay} min
-          </span>
+      {/* Max Travel Time — 3-button toggle */}
+      <div className="px-4 pt-3 pb-2">
+        <p className="font-mono text-[10px] text-[#7a93b8] uppercase tracking-wider mb-2">
+          Max Travel Time (MBTA)
+        </p>
+        <div className="flex gap-2">
+          {MAX_TIME_OPTIONS.map((v) => (
+            <button
+              key={v}
+              onClick={() => setTravelTimeLimit(v)}
+              className={`flex-1 py-1.5 rounded-lg text-xs font-mono border transition-all duration-150 ${
+                travelTimeLimit === v
+                  ? 'bg-[#f5a623] text-[#0a1628] border-[#f5a623] font-semibold'
+                  : 'bg-transparent text-[#7a93b8] border-[#1e3358] hover:border-[#7a93b8]'
+              }`}
+            >
+              {v} min
+            </button>
+          ))}
         </div>
-        <TravelTimeSlider
+      </div>
+
+      {/* Priority Slider: Time vs Cost */}
+      <div className="px-4 pb-3 border-b border-[#1e3358]">
+        <div className="flex items-center justify-between mb-2">
+          <p className="font-mono text-[10px] text-[#7a93b8] uppercase tracking-wider">Priority</p>
+          <div className="flex gap-2 font-mono text-[10px]">
+            <span className={sliderDisplay < 40 ? 'text-[#f5a623]' : 'text-[#7a93b8]'}>Cheapest</span>
+            <span className="text-[#1e3358]">|</span>
+            <span className={sliderDisplay > 60 ? 'text-[#f5a623]' : 'text-[#7a93b8]'}>Fastest</span>
+          </div>
+        </div>
+
+        <PrioritySlider
           value={sliderDisplay}
           onChange={setSliderDisplay}
-          onCommit={(v) => setTravelTimeLimit(v)}
+          onCommit={(v) => setTimeWeight(v)}
         />
+
         <div className="flex justify-between mt-1.5">
-          {[15, 30, 45].map((v) => (
-            <span key={v} className="font-mono text-[10px] text-[#7a93b8]/60">{v} min</span>
-          ))}
+          <span className="font-mono text-[10px] text-[#7a93b8]/60">Cost first</span>
+          <span className="font-mono text-[10px] text-[#7a93b8]/60">Balanced</span>
+          <span className="font-mono text-[10px] text-[#7a93b8]/60">Time first</span>
         </div>
       </div>
 
@@ -279,16 +307,14 @@ function ResourceCard({ resource, highlighted }: { resource: FrontendFoodResourc
   )
 }
 
-// ─── Custom Travel Time Slider ────────────────────────────────────────────────
+// ─── Priority Slider (Time vs Cost) ───────────────────────────────────────────
 
 /**
- * Slider with debounced store update.
- *
- * - onChange: updates the local display value on every tick (no re-fetch)
- * - onCommit: called only on mouseup/touchend — triggers the actual API fetch
- * - step=15: snaps to 15, 30, 45 minutes only
+ * 0–100 slider: 0 = prioritise cost, 100 = prioritise time.
+ * - onChange: updates local display on every tick (no re-fetch)
+ * - onCommit: called only on mouseup/touchend — triggers API fetch
  */
-function TravelTimeSlider({
+function PrioritySlider({
   value,
   onChange,
   onCommit,
@@ -297,31 +323,26 @@ function TravelTimeSlider({
   onChange: (v: number) => void
   onCommit: (v: number) => void
 }) {
-  const min = 15
-  const max = 45
-  const pct = ((value - min) / (max - min)) * 100
-
   return (
     <div className="relative">
       <input
         type="range"
-        min={min}
-        max={max}
-        step={15}
+        min={0}
+        max={100}
+        step={1}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
         onMouseUp={(e) => onCommit(Number((e.target as HTMLInputElement).value))}
         onTouchEnd={(e) => onCommit(Number((e.target as HTMLInputElement).value))}
         className="w-full h-1.5 appearance-none rounded-full outline-none cursor-pointer"
         style={{
-          background: `linear-gradient(to right, #f5a623 ${pct}%, #1e3358 ${pct}%)`,
+          background: `linear-gradient(to right, #8b5cf6 0%, #f5a623 ${value}%, #1e3358 ${value}%)`,
         }}
       />
       <style>{`
         input[type='range']::-webkit-slider-thumb {
           -webkit-appearance: none;
-          width: 16px;
-          height: 16px;
+          width: 16px; height: 16px;
           border-radius: 50%;
           background: #f5a623;
           border: 2px solid #0a1628;
@@ -329,8 +350,7 @@ function TravelTimeSlider({
           box-shadow: 0 0 0 3px rgba(245,166,35,0.2);
         }
         input[type='range']::-moz-range-thumb {
-          width: 16px;
-          height: 16px;
+          width: 16px; height: 16px;
           border-radius: 50%;
           background: #f5a623;
           border: 2px solid #0a1628;

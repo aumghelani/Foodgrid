@@ -136,6 +136,102 @@ def compute_vulnerability_index(
     return round(float(max(0.0, min(1.0, raw))), 4)
 
 
+def compute_full_equity_score(
+    *,
+    p_fi_rate: float = 0.15,
+    mhhinc: float = 60_000.0,
+    food_avg: float = 8_000.0,
+    lilatracts_all: int = 0,
+    supply_score: float = 0.5,
+    transit_coverage: float = 0.5,
+    mhhinc_min: float = 20_000.0,
+    mhhinc_max: float = 120_000.0,
+) -> dict:
+    """
+    Compute the full equity score using a 5-component formula with LILA bonus.
+
+    Components (weights sum to 1.0):
+      Need        (35%): food insecurity rate [0, 1]
+      Income Gap  (20%): normalised inverse of median household income
+      Food Burden (15%): ratio of food spending to income, capped at 0.40
+      Access      (20%): 50% LILA flag + 50% low transit coverage
+      Resource    (10%): inverse of supply density score
+
+    LILA bonus: if lilatracts_all == 1, food_risk_score is bumped +0.15
+    (clamped to 1.0) to reflect the USDA 'food desert' classification.
+
+    Args:
+        p_fi_rate:        Food insecurity rate as a fraction or percentage.
+                          Values > 1.0 are divided by 100 automatically.
+        mhhinc:           Median household income in dollars.
+        food_avg:         Annual food spending per household in dollars.
+        lilatracts_all:   USDA LILA classification flag (0 or 1).
+        supply_score:     Food resource density normalised to [0, 1].
+        transit_coverage: Transit accessibility normalised to [0, 1].
+        mhhinc_min:       City-wide minimum median household income.
+        mhhinc_max:       City-wide maximum median household income.
+
+    Returns:
+        Dict with keys:
+          food_risk_score, equity_score, need_score, vulnerability_index,
+          supply_score, and equity_components (per-component breakdown).
+    """
+    # Normalise p_fi_rate: values > 1 are percentages
+    if p_fi_rate > 1.0:
+        p_fi_rate = p_fi_rate / 100.0
+    p_fi_rate = float(max(0.0, min(1.0, p_fi_rate)))
+
+    # Need (35%): raw food insecurity rate
+    need = p_fi_rate
+
+    # Income Gap (20%): lower income = higher risk
+    income_gap = 1.0 - normalize(mhhinc, mhhinc_min, mhhinc_max)
+
+    # Food Burden (15%): food_avg/mhhinc ratio, max 40% = full burden
+    if mhhinc and mhhinc > 0:
+        burden_ratio = food_avg / mhhinc
+    else:
+        burden_ratio = 0.20
+    food_burden = float(min(1.0, burden_ratio / 0.40))
+
+    # Access (20%): LILA flag + low transit coverage
+    access = 0.5 * float(lilatracts_all) + 0.5 * (1.0 - float(transit_coverage))
+    access = float(max(0.0, min(1.0, access)))
+
+    # Resource (10%): inverse supply density
+    resource = 1.0 - float(supply_score)
+
+    raw_risk = (
+        0.35 * need
+        + 0.20 * income_gap
+        + 0.15 * food_burden
+        + 0.20 * access
+        + 0.10 * resource
+    )
+
+    # LILA bonus
+    if lilatracts_all:
+        raw_risk += 0.15
+
+    food_risk_score = round(float(max(0.0, min(1.0, raw_risk))), 4)
+    equity_score    = round(1.0 - food_risk_score, 4)
+
+    return {
+        "food_risk_score":     food_risk_score,
+        "equity_score":        equity_score,
+        "need_score":          round(need, 4),
+        "vulnerability_index": round((income_gap + food_burden) / 2.0, 4),
+        "supply_score":        round(float(supply_score), 4),
+        "equity_components": {
+            "need":        round(need, 4),
+            "income_gap":  round(income_gap, 4),
+            "food_burden": round(food_burden, 4),
+            "access":      round(access, 4),
+            "resource":    round(resource, 4),
+        },
+    }
+
+
 def recompute_city_stats(tract_docs: list[dict]) -> dict:
     """
     Recompute city-wide aggregate statistics from a list of tract documents.

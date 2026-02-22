@@ -29,6 +29,13 @@ class FoodResourceSerializer(serializers.Serializer):
     phone = serializers.CharField(allow_null=True, allow_blank=True, default=None)
     # Optional computed field added by filters.apply_distance_filter()
     transit_minutes_est = serializers.IntegerField(read_only=True, required=False, allow_null=True)
+    # Store hierarchy enrichment (added by resources/views.py via store_hierarchy.enrich_resource)
+    category    = serializers.CharField(allow_blank=True, default="grocery")
+    price_score = serializers.FloatField(default=0.5)
+    price_tier  = serializers.CharField(allow_blank=True, default="Moderate")
+    price_label = serializers.CharField(allow_blank=True, default="")
+    price_dots  = serializers.IntegerField(default=2)
+    hex_color   = serializers.CharField(allow_blank=True, default="#84cc16")
 
 
 class ResourceListSerializer(serializers.Serializer):

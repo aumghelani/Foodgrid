@@ -32,6 +32,27 @@ export interface TractProperties {
   need_score: number
   /** Food supply adequacy score (0.0–1.0). Higher = better supply. */
   supply_score: number
+  /** Median household income (dollars). 0 when not yet ingested. */
+  mhhinc: number
+  /** USDA LILA (food desert) classification flag. 1 = LILA tract. */
+  lila_flag: number
+}
+
+/** Per-component breakdown of the 5-factor equity score. */
+export interface EquityComponents {
+  need:        number   // 35% weight — food insecurity rate
+  income_gap:  number   // 20% weight — inverse normalised income
+  food_burden: number   // 15% weight — food spend / income ratio
+  access:      number   // 20% weight — LILA + transit inverse
+  resource:    number   // 10% weight — inverse supply density
+}
+
+/** Full tract detail response from /api/v1/tracts/<id>/ */
+export interface TractDetail {
+  tract:             TractProperties
+  resources:         import('../types/resources').BackendFoodResource[]
+  equity_components: EquityComponents
+  ai_explanation:    string | null
 }
 
 /**

@@ -1,90 +1,105 @@
 import { useRef, useCallback } from 'react'
 import type { MapRef } from 'react-map-gl/maplibre'
-import type { MapLayerMouseEvent } from 'maplibre-gl'
 import type { TractProperties } from '../../types/map'
 
-/**
- * Return type of `useMapInteraction`.
- * Handlers are typed as `MapLayerMouseEvent` because that is exactly what
- * react-map-gl passes to `onMouseMove`, `onClick`, and `onMouseLeave` on the
- * `<Map>` component.  `handleMouseLeave` accepts no arguments because
- * TypeScript allows omitting trailing parameters in callback types.
- */
 export interface MapInteractionHandlers {
-  /** Wire to <Map onMouseMove={…}> — updates hover feature-state. */
-  handleMouseMove: (e: MapLayerMouseEvent) => void
-  /** Wire to <Map onMouseLeave={…}> — clears hover state when cursor exits the canvas. */
-  handleMouseLeave: () => void
-  /** Wire to <Map onClick={…}> — selects a tract and fires onTractSelected. */
-  handleClick: (e: MapLayerMouseEvent) => void
+  /**
+   * Called from DeckGL's onHover with the cursor's canvas pixel position.
+   * Queries MapLibre's rendered features at that position and updates
+   * hover feature-state for the 'tracts' source.
+   *
+   * Must be called from DeckGL — NOT wired to MapGL events.
+   * When MapGL is a child of DeckGL, MapGL's onMouseMove / onClick do not
+   * fire because DeckGL's canvas intercepts all DOM pointer events first.
+   */
+  onDeckHover: (x: number, y: number) => void
+
+  /**
+   * Called from DeckGL's onClick.
+   * Queries MapLibre at the click position; if a tract is found,
+   * updates selected feature-state and fires onTractSelected.
+   */
+  onDeckClick: (x: number, y: number) => void
+
+  /**
+   * Clears hover state — wire to the map container's onMouseLeave.
+   * Required because DeckGL's onHover does not fire when the cursor
+   * exits the canvas entirely.
+   */
+  clearHover: () => void
+}
+
+export interface MapInteractionOptions {
+  /**
+   * Called when a tract is hovered (preview). Null when mouse leaves all tracts.
+   * Used to update the government-mode info panel on hover (not just click).
+   */
+  onHovered?: (properties: TractProperties | null) => void
+  /**
+   * Cursor state updater from MapView React state. DeckGL reads this in its
+   * getCursor callback. Do NOT manipulate canvas.style.cursor directly.
+   */
+  setCursor?: (cursor: string) => void
 }
 
 /**
- * Custom hook that wires MapLibre feature-state (hover + selected) to
- * react-map-gl mouse event props without touching React state.
+ * Manages MapLibre feature-state (hover + selected) for census tracts,
+ * driven by DeckGL pointer events rather than MapGL event props.
  *
- * ### Why refs instead of useState?
- * `setFeatureState` is a side-effect that modifies the MapLibre style directly.
- * Storing hoveredId / selectedId in React state would trigger a re-render on
- * every mouse-move, causing visible flicker and unnecessary reconciliation.
- * Refs give us mutable storage that survives re-renders without causing them.
+ * WHY DeckGL-based events?
+ * When react-map-gl's <Map> is rendered as a child of <DeckGL>, DeckGL's
+ * canvas sits on top and captures all DOM pointer events. MapLibre's own
+ * canvas never receives raw mousemove / click events, so <Map onMouseMove>
+ * and <Map onClick> do not fire. We instead call queryRenderedFeatures()
+ * manually using the pixel coordinates from DeckGL's PickingInfo.
  *
- * ### Why not map.on() inside useEffect?
- * react-map-gl v7 exposes `onMouseMove`, `onClick`, etc. as React props.
- * Using those props keeps event wiring declarative, avoids memory-leak risks
- * from missing cleanup, and plays well with React Strict Mode double-invocation.
+ * Cursor is communicated via `setCursor` so DeckGL's getCursor prop can
+ * compose it with its own isHovering / isDragging flags.
  *
- * @param mapRef     - ref attached to the react-map-gl `<Map>` component
- * @param onSelected - callback fired with the clicked tract's properties
+ * Refs (not state) track hovered/selected IDs — no React re-render on
+ * every mouse-move.
  */
 export function useMapInteraction(
   mapRef: React.RefObject<MapRef>,
   onSelected: (properties: TractProperties) => void,
+  options?: MapInteractionOptions,
 ): MapInteractionHandlers {
-  /**
-   * ID of the tract currently under the cursor.
-   * Stored as a ref so that updating it never triggers a React re-render.
-   */
-  const hoveredIdRef = useRef<number | null>(null)
-
-  /**
-   * ID of the tract the user has clicked and selected.
-   * Kept in a ref for the same reason as hoveredIdRef.
-   */
+  const hoveredIdRef  = useRef<number | null>(null)
   const selectedIdRef = useRef<number | null>(null)
 
-  // ── Hover ────────────────────────────────────────────────────────────────
+  const { onHovered, setCursor } = options ?? {}
 
-  const handleMouseMove = useCallback(
-    (e: MapLayerMouseEvent) => {
+  // ── Hover ─────────────────────────────────────────────────────────────────
+
+  const onDeckHover = useCallback(
+    (x: number, y: number) => {
       const map = mapRef.current?.getMap()
-      if (!map) return
+      if (!map || !map.getLayer('tract-fill')) return
 
-      if (!map.getLayer('tract-fill')) return
-
-      const features = map.queryRenderedFeatures(e.point, { layers: ['tract-fill'] })
+      // queryRenderedFeatures with pixel coords from DeckGL PickingInfo.
+      // These coords are in the same canvas space as MapLibre's canvas,
+      // so the query is accurate even though MapLibre never received the
+      // raw DOM mouse event.
+      const features = map.queryRenderedFeatures([x, y], { layers: ['tract-fill'] })
 
       if (!features.length) {
-        // Cursor moved to empty map space — clear hover but keep cursor as-is.
-        // Full cursor reset happens in handleMouseLeave (when exiting the canvas).
+        // Cursor moved off all tracts — clear hover state.
         if (hoveredIdRef.current !== null) {
           map.setFeatureState(
             { source: 'tracts', id: hoveredIdRef.current },
             { hover: false },
           )
           hoveredIdRef.current = null
+          onHovered?.(null)
         }
-        map.getCanvas().style.cursor = ''
+        setCursor?.('default')
         return
       }
 
       const feature = features[0]
-      // feature.id is `string | number | undefined` per MapLibre types.
-      // We assert to `number` here because all features in BOSTON_TRACTS carry
-      // explicit numeric IDs — no string IDs or auto-generated IDs are used.
-      const newId = feature.id as number
+      const newId   = feature.id as number
 
-      // Clear hover on the previously-hovered tract (if different).
+      // Clear previous tract's hover before setting the new one.
       if (hoveredIdRef.current !== null && hoveredIdRef.current !== newId) {
         map.setFeatureState(
           { source: 'tracts', id: hoveredIdRef.current },
@@ -92,22 +107,21 @@ export function useMapInteraction(
         )
       }
 
-      // Apply hover to the tract now under the cursor.
-      map.setFeatureState(
-        { source: 'tracts', id: newId },
-        { hover: true },
-      )
+      map.setFeatureState({ source: 'tracts', id: newId }, { hover: true })
       hoveredIdRef.current = newId
 
-      // Show pointer cursor to signal interactivity.
-      map.getCanvas().style.cursor = 'pointer'
+      // crosshair = "data polygon"; pointer is reserved for resource dots
+      // (DeckGL's isHovering flag already handles that via getCursor).
+      setCursor?.('crosshair')
+
+      onHovered?.(feature.properties as TractProperties)
     },
-    [mapRef],
+    [mapRef, onHovered, setCursor],
   )
 
-  // ── Mouse-leave (entire canvas) ───────────────────────────────────────────
+  // ── Clear hover (cursor exits map canvas) ─────────────────────────────────
 
-  const handleMouseLeave = useCallback(() => {
+  const clearHover = useCallback(() => {
     const map = mapRef.current?.getMap()
     if (!map) return
 
@@ -117,29 +131,26 @@ export function useMapInteraction(
         { hover: false },
       )
       hoveredIdRef.current = null
+      onHovered?.(null)
     }
 
-    // Reset cursor to the browser default.
-    map.getCanvas().style.cursor = ''
-  }, [mapRef])
+    setCursor?.('default')
+  }, [mapRef, onHovered, setCursor])
 
-  // ── Click / select ────────────────────────────────────────────────────────
+  // ── Click / select ─────────────────────────────────────────────────────────
 
-  const handleClick = useCallback(
-    (e: MapLayerMouseEvent) => {
+  const onDeckClick = useCallback(
+    (x: number, y: number) => {
       const map = mapRef.current?.getMap()
-      if (!map) return
+      if (!map || !map.getLayer('tract-fill')) return
 
-      if (!map.getLayer('tract-fill')) return
-      const features = map.queryRenderedFeatures(e.point, { layers: ['tract-fill'] })
+      const features = map.queryRenderedFeatures([x, y], { layers: ['tract-fill'] })
       if (!features.length) return
 
-      const feature = features[0]
-      // Same rationale as in handleMouseMove: asserting `number` is safe because
-      // all BOSTON_TRACTS features have explicit numeric IDs.
+      const feature   = features[0]
       const clickedId = feature.id as number
 
-      // Deselect the previously selected tract (if any).
+      // Clear the previously selected tract.
       if (selectedIdRef.current !== null) {
         map.setFeatureState(
           { source: 'tracts', id: selectedIdRef.current },
@@ -147,21 +158,13 @@ export function useMapInteraction(
         )
       }
 
-      // Apply selected state to the clicked tract.
-      map.setFeatureState(
-        { source: 'tracts', id: clickedId },
-        { selected: true },
-      )
+      map.setFeatureState({ source: 'tracts', id: clickedId }, { selected: true })
       selectedIdRef.current = clickedId
 
-      // feature.properties is `{ [name: string]: any }` in MapLibre's types.
-      // We cast to TractProperties because the source is BOSTON_TRACTS, whose
-      // properties are fully typed and structurally match TractProperties.
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       onSelected(feature.properties as TractProperties)
     },
     [mapRef, onSelected],
   )
 
-  return { handleMouseMove, handleMouseLeave, handleClick }
+  return { onDeckHover, onDeckClick, clearHover }
 }

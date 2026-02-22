@@ -214,13 +214,114 @@ def tract_detail(request, tract_id: str):
 
     resource_serializer = FoodResourceSerializer(resource_docs, many=True)
 
+    # Pull equity_components if stored (by ingest_datasets); else empty dict.
+    equity_components = tract.pop("equity_components", {}) or {}
+
     payload = {
         "tract": tract,
         "resources": resource_serializer.data,
+        "equity_components": equity_components,
         "ai_explanation": None,  # Placeholder — Ollama integration is separate.
     }
     serializer = TractDetailSerializer(payload)
     return Response(serializer.data)
+
+
+@api_view(["GET"])
+def county_scores(request):
+    """
+    GET /api/v1/tracts/county-scores/
+
+    Returns county-level aggregate scores computed via MongoDB aggregation
+    pipeline over the census_tracts collection.
+
+    Groups tracts by county_fips (defaults to '25025' / Suffolk County for all
+    tracts that pre-date the county_fips field).
+
+    Response shape:
+      [
+        {
+          "county_fips": "25025",
+          "county_name": "Suffolk County",
+          "tract_count": int,
+          "avg_equity_score": float,
+          "avg_food_risk": float,
+          "high_risk_count": int,
+          "lila_count": int,
+          "avg_mhhinc": float,
+          "avg_transit_coverage": float
+        }
+      ]
+    """
+    pipeline = [
+        # Default county_fips to "25025" for legacy documents
+        {
+            "$addFields": {
+                "_county_fips": {
+                    "$ifNull": ["$county_fips", "25025"]
+                },
+                "_county_name": {
+                    "$ifNull": ["$county_name", "Suffolk County"]
+                },
+            }
+        },
+        {
+            "$group": {
+                "_id": "$_county_fips",
+                "county_name":         {"$first": "$_county_name"},
+                "tract_count":         {"$sum": 1},
+                "avg_equity_score":    {"$avg": "$equity_score"},
+                "avg_food_risk":       {"$avg": "$food_risk_score"},
+                "high_risk_count":     {"$sum": {"$cond": [{"$gte": ["$food_risk_score", 0.7]}, 1, 0]}},
+                "lila_count":          {"$sum": {"$cond": [{"$eq": ["$lila_flag", 1]}, 1, 0]}},
+                "avg_mhhinc":          {"$avg": "$mhhinc"},
+                "avg_transit_coverage":{"$avg": "$transit_coverage"},
+            }
+        },
+        {"$sort": {"_id": 1}},
+    ]
+
+    docs = list(tracts_col().aggregate(pipeline))
+
+    if not docs:
+        # Fallback to mock aggregation from static mock tracts
+        docs = [
+            {
+                "_id": "25025",
+                "county_name": "Suffolk County",
+                "tract_count": len(_MOCK_TRACTS),
+                "avg_equity_score": round(
+                    sum(t["equity_score"] for t in _MOCK_TRACTS) / len(_MOCK_TRACTS), 3
+                ),
+                "avg_food_risk": round(
+                    sum(t["food_risk_score"] for t in _MOCK_TRACTS) / len(_MOCK_TRACTS), 3
+                ),
+                "high_risk_count": sum(
+                    1 for t in _MOCK_TRACTS if t["food_risk_score"] >= 0.7
+                ),
+                "lila_count": 0,
+                "avg_mhhinc": 55000.0,
+                "avg_transit_coverage": round(
+                    sum(t["transit_coverage"] for t in _MOCK_TRACTS) / len(_MOCK_TRACTS), 3
+                ),
+            }
+        ]
+
+    results = []
+    for doc in docs:
+        results.append({
+            "county_fips":          doc.get("_id", "25025"),
+            "county_name":          doc.get("county_name", "Suffolk County"),
+            "tract_count":          int(doc.get("tract_count", 0)),
+            "avg_equity_score":     round(float(doc.get("avg_equity_score") or 0), 3),
+            "avg_food_risk":        round(float(doc.get("avg_food_risk") or 0), 3),
+            "high_risk_count":      int(doc.get("high_risk_count", 0)),
+            "lila_count":           int(doc.get("lila_count", 0)),
+            "avg_mhhinc":           round(float(doc.get("avg_mhhinc") or 0), 0),
+            "avg_transit_coverage": round(float(doc.get("avg_transit_coverage") or 0), 3),
+        })
+
+    return Response(results)
 
 
 @api_view(["GET"])

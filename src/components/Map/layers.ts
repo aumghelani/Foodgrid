@@ -60,6 +60,22 @@ const borderWidthExpr = [
   0.8,
 ] as ExpressionSpecification
 
+/**
+ * Border opacity driven by feature state.
+ * Active (hovered / selected) borders are fully opaque.
+ * Resting borders are very subtle — 30% opacity keeps the map readable.
+ *
+ * Without this expression MapLibre defaults line-opacity to 1.0 for ALL states,
+ * which makes the default thin borders visually noisy and can obscure the
+ * choropleth colour ramp beneath them.
+ */
+const borderOpacityExpr = [
+  'case',
+  ['boolean', ['feature-state', 'selected'], false], 1.0,
+  ['boolean', ['feature-state', 'hover'],    false], 1.0,
+  0.3,
+] as ExpressionSpecification
+
 // ─── Exported layer specs ─────────────────────────────────────────────────────
 
 /**
@@ -108,8 +124,13 @@ export const BORDER_LAYER: LineLayerSpecification = {
   id: 'tract-border',
   type: 'line',
   source: 'tracts',
+  layout: {
+    'line-cap':  'round',
+    'line-join': 'round',
+  },
   paint: {
-    'line-color': borderColorExpr,
-    'line-width': borderWidthExpr,
+    'line-color':   borderColorExpr,
+    'line-width':   borderWidthExpr,
+    'line-opacity': borderOpacityExpr,
   },
 }

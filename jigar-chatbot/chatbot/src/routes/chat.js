@@ -5,22 +5,27 @@ import { listMetrics, getMetric } from "../tools/policymapTools.js";
 
 const router = express.Router();
 
+// ─── Request schema ───────────────────────────────────────────────────────────
+// Frontend (ChatPanel.tsx) sends:
+//   { message: string, history: [{role, content}]?, language: string? }
+
 const reqSchema = z.object({
-  messages: z.array(z.object({
-    role: z.enum(["user", "assistant", "system"]),
-    content: z.string().min(1)
-  })).min(1)
+  message:  z.string().min(1),
+  history:  z.array(z.object({
+    role:    z.enum(["user", "assistant"]),
+    content: z.string(),
+  })).optional().default([]),
+  language: z.string().optional().default("en"),
 });
 
-function lastUserText(messages) {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === "user") return messages[i].content;
-  }
-  return "";
-}
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const LANGUAGE_NAMES = {
+  es: "Spanish", zh: "Chinese", pt: "Portuguese", fr: "French",
+  hi: "Hindi",   ar: "Arabic",  de: "German",     ja: "Japanese",
+};
 
 function extractGeoID(text) {
-  // geoid: 25025000101 OR GeoID 25025000101 OR just number
   const m =
     text.match(/\bgeoid\b[^0-9]*([0-9]{8,12})\b/i) ||
     text.match(/\b([0-9]{8,12})\b/);
@@ -28,64 +33,54 @@ function extractGeoID(text) {
 }
 
 function extractMetric(text) {
-  // metric: Median Household Income
-  // metric="Median Household Income"
   const m = text.match(/metric\s*[:=]\s*["']?([^"'\n]+)["']?/i);
   return m ? m[1].trim() : null;
 }
 
-function detectLanguageInstruction(text) {
-  const t = text.toLowerCase();
-  if (t.includes("responde en español") || t.includes("en español") || t.includes("español")) return "Spanish";
-  if (t.includes("हिंदी") || t.includes("hindi")) return "Hindi";
-  if (t.includes("العربية") || t.includes("arabic")) return "Arabic";
-  if (t.includes("français") || t.includes("french")) return "French";
-  if (t.includes("中文") || t.includes("chinese")) return "Chinese";
-  return null;
-}
-
 async function resolveMetricName(userMetric) {
-  // PolicyMap metric names must match column headers exactly.
-  // We'll do a case-insensitive "best match" search from list_metrics.
   const all = await listMetrics();
   const metrics = all.metrics || [];
   const q = userMetric.toLowerCase();
 
-  // exact (case-insensitive)
   let best = metrics.find(m => m.toLowerCase() === q);
   if (best) return best;
-
-  // contains
   best = metrics.find(m => m.toLowerCase().includes(q));
   if (best) return best;
-
-  // reverse contains
   best = metrics.find(m => q.includes(m.toLowerCase()));
-  if (best) return best;
-
-  return null;
+  return best ?? null;
 }
+
+// ─── POST /chat ───────────────────────────────────────────────────────────────
 
 router.post("/", async (req, res) => {
   try {
     const parsed = reqSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: "invalid_request" });
+    if (!parsed.success) {
+      return res.status(400).json({ error: "invalid_request", detail: parsed.error.flatten() });
+    }
 
-    const messages = parsed.data.messages.slice(-12);
-    const text = lastUserText(messages);
+    const { message: userText, history, language } = parsed.data;
 
-    const geoid = extractGeoID(text);
-    const userMetric = extractMetric(text);
-    const lang = detectLanguageInstruction(text);
+    // Build the conversation array (last 10 turns of history + current message)
+    const fullMessages = [
+      ...history.slice(-10),
+      { role: "user", content: userText },
+    ];
 
-    // ✅ HARD RULE: if metric + geoid provided, ALWAYS fetch from CSV (no guessing)
+    const langName = LANGUAGE_NAMES[language] ?? null;
+    const langNote = langName ? ` Respond in ${langName}.` : "";
+
+    const geoid      = extractGeoID(userText);
+    const userMetric = extractMetric(userText);
+
+    // ── Data query: metric + geoid both provided ──────────────────────────────
     if (geoid && userMetric) {
       const metric = await resolveMetricName(userMetric);
 
       if (!metric) {
         const all = await listMetrics();
         return res.json({
-          reply: `I couldn't find metric "${userMetric}". Try one of these:\n- ${all.metrics.slice(0, 20).join("\n- ")}\n(Use: metric: <exact name> geoid: <number>)`
+          reply: `I couldn't find metric "${userMetric}". Available metrics include:\n- ${all.metrics.slice(0, 15).join("\n- ")}\n\nTry: metric: <name>  geoid: <number>`,
         });
       }
 
@@ -93,53 +88,48 @@ router.post("/", async (req, res) => {
 
       if (!out.found) {
         return res.json({
-          reply: `No row found for GeoID ${geoid} under metric "${metric}".`
+          reply: `No data found for GeoID ${geoid} under metric "${metric}".`,
         });
       }
 
-      // If user asked for a specific language, let Llama phrase the answer BUT using our retrieved value
-      if (lang) {
-        const system = {
-          role: "system",
-          content: `You are a helpful assistant. Respond ONLY in ${lang}. Do not change numbers.`
-        };
-
+      // Non-English: let Gemini rephrase with the real data
+      if (langName) {
+        const systemPrompt = `You are FoodGrid Boston's data assistant. Respond ONLY in ${langName}. Do not change numbers or facts.`;
         const dataMessage = {
-          role: "user",
-          content:
-`Use this factual data exactly:
-- metric: ${out.metric}
-- GeoID: ${out.geoid}
-- Geography Name: ${out.geography_name}
-- value: ${out.value}
-- time period: ${out.time_period}
-- source: ${out.data_source}
-
-Now answer the user's question in ${lang} in 1–2 sentences.`
+          role:    "user",
+          content: `Provide this data in ${langName} in 1–2 sentences:\n- Metric: ${out.metric}\n- GeoID: ${out.geoid}\n- Area: ${out.geography_name}\n- Value: ${out.value}\n- Period: ${out.time_period}\n- Source: ${out.data_source}`,
         };
-
-        const reply = await ollamaChat({ messages: [system, dataMessage] });
+        const reply = await ollamaChat({ messages: [dataMessage], systemPrompt });
         return res.json({ reply });
       }
 
-      // Default (English): return exact data
+      // English: return exact data
       return res.json({
-        reply: `${out.metric} for GeoID ${out.geoid} (${out.geography_name}) = ${out.value}\nTime: ${out.time_period}\nSource: ${out.data_source}`
+        reply: `${out.metric}\nArea: ${out.geography_name} (GeoID ${out.geoid})\nValue: ${out.value}\nPeriod: ${out.time_period}\nSource: ${out.data_source}`,
       });
     }
 
-    // Fallback normal chat (no data request)
-    const system = {
-      role: "system",
-      content: `You are Foodgrid's assistant. If the user wants CSV data, ask them to provide:\nmetric: <name>\ngeoid: <number>\nSuggest: "list metrics".`
-    };
+    // ── "list metrics" intent ─────────────────────────────────────────────────
+    if (/\blist\s+metrics?\b/i.test(userText)) {
+      const all = await listMetrics();
+      return res.json({
+        reply: `Available PolicyMap metrics (${all.metrics.length} total):\n- ${all.metrics.slice(0, 20).join("\n- ")}${all.metrics.length > 20 ? `\n…and ${all.metrics.length - 20} more.` : ""}`,
+      });
+    }
 
-    const reply = await ollamaChat({ messages: [system, ...messages] });
+    // ── General conversation via Gemini ───────────────────────────────────────
+    const systemPrompt =
+      `You are FoodGrid Boston's food access assistant — friendly, concise, and factual.${langNote} ` +
+      `Help residents find food resources, understand SNAP benefits, transit access, and local food programs in Boston. ` +
+      `If the user wants specific census-tract data, ask them to provide: metric: <name>  geoid: <11-digit number>. ` +
+      `Keep responses under 120 words.`;
+
+    const reply = await ollamaChat({ messages: fullMessages, systemPrompt });
     return res.json({ reply });
 
   } catch (e) {
     console.error("Chat error:", e);
-    return res.status(500).json({ error: "internal_error" });
+    return res.status(500).json({ error: "internal_error", detail: e.message });
   }
 });
 

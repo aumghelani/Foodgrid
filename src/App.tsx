@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import Header from './components/Header/Header'
 import MapView from './components/Map/MapView'
@@ -5,11 +6,14 @@ import ResidentSidebar from './components/ResidentMode/ResidentSidebar'
 import GovernmentSidebar from './components/GovernmentMode/GovernmentSidebar'
 import CityStatsBar from './components/GovernmentMode/CityStatsBar'
 import ApiErrorBanner from './components/ApiErrorBanner'
+import ChatButton from './components/ChatBot/ChatButton'
+import ChatPanel from './components/ChatBot/ChatPanel'
 import { useMapStore } from './store/useMapStore'
 import { useTracts, useCityStats } from './api/hooks'
 import type { TractProperties } from './types/map'
 
 export default function App() {
+  const [chatOpen, setChatOpen] = useState(false)
   const { mode, setMode, setSelectedTract } = useMapStore()
 
   // Subscribe to the two most critical queries at App level so we can show
@@ -89,6 +93,14 @@ export default function App() {
             >
               <CityStatsBar />
             </motion.div>
+          )}
+
+          {/* Chat — resident mode only */}
+          {mode === 'resident' && (
+            <>
+              <ChatPanel open={chatOpen} />
+              <ChatButton open={chatOpen} onClick={() => setChatOpen((o) => !o)} />
+            </>
           )}
         </div>
       </div>

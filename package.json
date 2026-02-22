@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:full": "concurrently --names \"API,UI\" -c \"bgBlue.bold,bgGreen.bold\" \"python backend/manage.py runserver 8000\" \"vite\"",
+    "chatbot": "cd jigar-chatbot/chatbot && node src/server.js",
+    "dev:full": "concurrently --names \"API,UI,BOT\" -c \"bgBlue.bold,bgGreen.bold,bgMagenta.bold\" \"python backend/manage.py runserver 8000\" \"vite\" \"cd jigar-chatbot/chatbot && node src/server.js\"",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
