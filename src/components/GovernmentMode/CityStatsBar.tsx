@@ -1,13 +1,16 @@
-import { cityStats } from '../../data/censusTracts'
+import { useCityStats } from '../../hooks/useCityStats'
 
 export default function CityStatsBar() {
+  const { data: stats } = useCityStats()
+  if (!stats) return null
+
   return (
     <div className="absolute top-4 left-4 z-10 flex gap-2 pointer-events-none">
-      <StatChip label="Equity Score" value={cityStats.equityScore.toFixed(2)} color="text-yellow-400" />
-      <StatChip label="Transit Cov." value={`${Math.round(cityStats.transitCoverage * 100)}%`} color="text-emerald-400" />
+      <StatChip label="Equity Score" value={stats.equity_score.toFixed(2)} color="text-yellow-400" />
+      <StatChip label="Transit Cov." value={`${Math.round(stats.transit_coverage * 100)}%`} color="text-emerald-400" />
       <StatChip
         label="High-Risk Tracts"
-        value={`${cityStats.highRiskTracts}/${cityStats.totalTracts}`}
+        value={`${stats.high_risk_tracts}/${stats.total_tracts}`}
         color="text-red-400"
       />
     </div>

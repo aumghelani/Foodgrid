@@ -1,5 +1,6 @@
 import { create } from 'zustand'
-import type { AppMode, ResourceFilter, ServiceFilter, InterventionType, TractProperties } from '../types'
+import type { AppMode, ResourceFilter, ServiceFilter, InterventionType } from '../types'
+import type { TractProperties } from '../types/map'
 
 interface MapStore {
   // Mode

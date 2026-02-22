@@ -4,15 +4,36 @@ import MapView from './components/Map/MapView'
 import ResidentSidebar from './components/ResidentMode/ResidentSidebar'
 import GovernmentSidebar from './components/GovernmentMode/GovernmentSidebar'
 import CityStatsBar from './components/GovernmentMode/CityStatsBar'
+import ApiErrorBanner from './components/ApiErrorBanner'
 import { useMapStore } from './store/useMapStore'
+import { useTracts, useCityStats } from './api/hooks'
+import type { TractProperties } from './types/map'
 
 export default function App() {
-  const { mode } = useMapStore()
+  const { mode, setMode, setSelectedTract } = useMapStore()
+
+  // Subscribe to the two most critical queries at App level so we can show
+  // the ApiErrorBanner when the backend is unreachable. React Query deduplicates
+  // these — no extra network requests are made even though MapView and
+  // GovernmentSidebar also call these hooks.
+  const { isError: tractsError } = useTracts()
+  const { isError: statsError } = useCityStats()
+  const apiOffline = tractsError || statsError
+
+  // When the user clicks a tract on the map, store its properties and
+  // switch to government mode so the sidebar shows the simulation panel.
+  const handleTractSelected = (props: TractProperties) => {
+    setSelectedTract(props)
+    setMode('government')
+  }
 
   return (
     <div className="flex flex-col h-screen bg-[#0a1628] overflow-hidden">
       {/* Sticky Header */}
       <Header />
+
+      {/* Backend offline banner — shown when Django is unreachable */}
+      <ApiErrorBanner visible={apiOffline} />
 
       {/* Main Content: Sidebar + Map */}
       <div className="flex flex-1 overflow-hidden relative">
@@ -54,7 +75,7 @@ export default function App() {
               transition={{ duration: 0.3 }}
               className="absolute inset-0"
             >
-              <MapView mode={mode} />
+              <MapView mode={mode} onTractSelected={handleTractSelected} />
             </motion.div>
           </AnimatePresence>
 

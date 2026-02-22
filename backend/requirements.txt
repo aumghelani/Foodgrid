@@ -1,0 +1,27 @@
+# Django core — 5.1+ required for Python 3.13 support
+django>=5.1,<6
+djangorestframework==3.15.*
+django-cors-headers==4.*
+
+# Configuration
+python-dotenv==1.*
+
+# Database — pymongo direct driver (no Djongo, no MongoEngine)
+pymongo==4.*
+motor==3.*          # async driver for future async views
+dnspython==2.*      # required for mongodb+srv:// URIs
+
+# Data validation
+pydantic==2.*
+
+# Spatial / scoring
+shapely==2.*
+numpy>=2,<3
+pandas==2.*
+
+# Geocoding (Nominatim / OpenStreetMap — no API key required)
+geopy==2.*
+
+# Dev tooling
+black==24.*
+isort==5.*

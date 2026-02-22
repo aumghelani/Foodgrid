@@ -1,7 +1,13 @@
+import { useState } from 'react'
 import { MapPin, Search, Volume2, Train } from 'lucide-react'
 import { useMapStore } from '../../store/useMapStore'
-import { foodResources, resourceLabels } from '../../data/foodResources'
-import type { ResourceFilter, ServiceFilter, FoodResource } from '../../types'
+import { useResources } from '../../api/hooks'
+import type { ResourceFilter, ServiceFilter } from '../../types'
+import type { FrontendFoodResource } from '../../types/resources'
+
+// Default origin: Boston City Hall — used for distance estimates until
+// the user enters their own address (geocoding not yet implemented).
+const BOSTON_CENTER = { lat: 42.3601, lng: -71.0589 }
 
 const RESOURCE_FILTERS: { key: ResourceFilter; label: string }[] = [
   { key: 'pantry', label: 'Pantries' },
@@ -23,6 +29,13 @@ const TYPE_COLORS: Record<string, string> = {
   mobile: 'text-blue-400 bg-blue-400/10 border-blue-400/30',
 }
 
+const resourceLabels: Record<string, string> = {
+  pantry:         'Pantry',
+  grocery:        'Grocery',
+  farmers_market: 'Farmers Market',
+  mobile:         'Mobile',
+}
+
 export default function ResidentSidebar() {
   const {
     activeResourceFilters,
@@ -33,11 +46,20 @@ export default function ResidentSidebar() {
     setTravelTimeLimit,
   } = useMapStore()
 
-  // Filter the results list
-  const results = foodResources
-    .filter((r) => activeResourceFilters.includes(r.type))
-    .filter((r) => r.transitMinutes <= travelTimeLimit)
-    .slice(0, 6)
+  // Local state for the slider display value — prevents API re-fetch on
+  // every tick. The store (and thus the query) only updates on mouse/touch up.
+  const [sliderDisplay, setSliderDisplay] = useState(travelTimeLimit)
+
+  // Fetch resources from the API with active filters applied server-side.
+  const { data: allResources = [], isLoading, isError, refetch } = useResources({
+    types:          activeResourceFilters,
+    serviceFilters: activeServiceFilters,
+    lat:            BOSTON_CENTER.lat,
+    lng:            BOSTON_CENTER.lng,
+    maxMinutes:     travelTimeLimit,
+  })
+
+  const results = allResources.slice(0, 6)
 
   return (
     <aside className="w-[340px] flex-shrink-0 h-full flex flex-col bg-[#0e1a30] border-r border-[#1e3358] overflow-y-auto">
@@ -107,10 +129,14 @@ export default function ResidentSidebar() {
             Max travel time (MBTA)
           </p>
           <span className="font-mono text-sm font-medium text-[#f5a623]">
-            {travelTimeLimit} min
+            {sliderDisplay} min
           </span>
         </div>
-        <TravelTimeSlider value={travelTimeLimit} onChange={setTravelTimeLimit} />
+        <TravelTimeSlider
+          value={sliderDisplay}
+          onChange={setSliderDisplay}
+          onCommit={(v) => setTravelTimeLimit(v)}
+        />
         <div className="flex justify-between mt-1.5">
           {[15, 30, 45].map((v) => (
             <span key={v} className="font-mono text-[10px] text-[#7a93b8]/60">{v} min</span>
@@ -122,16 +148,35 @@ export default function ResidentSidebar() {
       <div className="flex-1 px-4 pt-3 pb-4">
         <div className="flex items-center gap-2 mb-3">
           <h2 className="font-display font-semibold text-sm text-white">Nearby Resources</h2>
-          <span className="font-mono text-xs px-1.5 py-0.5 bg-[#f5a623]/15 text-[#f5a623] rounded-full border border-[#f5a623]/30">
-            {results.length}
-          </span>
+          {!isLoading && (
+            <span className="font-mono text-xs px-1.5 py-0.5 bg-[#f5a623]/15 text-[#f5a623] rounded-full border border-[#f5a623]/30">
+              {results.length}
+            </span>
+          )}
         </div>
 
         <div className="flex flex-col gap-2">
-          {results.map((resource, i) => (
+          {isLoading && <ResourceSkeleton />}
+
+          {!isLoading && isError && (
+            <div className="text-center py-6">
+              <p className="text-sm text-red-400/80 font-mono mb-3">
+                Could not load resources — is the API running?
+              </p>
+              <button
+                onClick={() => refetch()}
+                className="px-3 py-1.5 rounded border border-red-700 text-red-300 hover:bg-red-900/30 transition-colors text-xs font-mono"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
+          {!isLoading && !isError && results.map((resource, i) => (
             <ResourceCard key={resource.id} resource={resource} highlighted={i === 0} />
           ))}
-          {results.length === 0 && (
+
+          {!isLoading && !isError && results.length === 0 && (
             <p className="text-sm text-[#7a93b8]/60 italic text-center py-8">
               No resources match the current filters.
             </p>
@@ -150,9 +195,36 @@ export default function ResidentSidebar() {
   )
 }
 
+// ─── Loading Skeleton ─────────────────────────────────────────────────────────
+
+function ResourceSkeleton() {
+  return (
+    <>
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="rounded-xl border border-[#1e3358] bg-[#111f38]/60 p-3 animate-pulse">
+          <div className="flex items-start justify-between gap-2 mb-2">
+            <div className="flex-1">
+              <div className="h-3 bg-[#1e3358] rounded w-3/4 mb-1.5" />
+              <div className="h-2.5 bg-[#1e3358] rounded w-1/2" />
+            </div>
+            <div className="h-4 w-16 bg-[#1e3358] rounded-full" />
+          </div>
+          <div className="flex items-center justify-between">
+            <div className="flex gap-1">
+              <div className="h-4 w-10 bg-[#1e3358] rounded-full" />
+              <div className="h-4 w-8 bg-[#1e3358] rounded-full" />
+            </div>
+            <div className="h-4 w-14 bg-[#1e3358] rounded-full" />
+          </div>
+        </div>
+      ))}
+    </>
+  )
+}
+
 // ─── Resource Card ────────────────────────────────────────────────────────────
 
-function ResourceCard({ resource, highlighted }: { resource: FoodResource; highlighted: boolean }) {
+function ResourceCard({ resource, highlighted }: { resource: FrontendFoodResource; highlighted: boolean }) {
   const typeColor = TYPE_COLORS[resource.type] ?? 'text-white bg-white/10 border-white/20'
 
   const tagColors: Record<string, string> = {
@@ -209,14 +281,25 @@ function ResourceCard({ resource, highlighted }: { resource: FoodResource; highl
 
 // ─── Custom Travel Time Slider ────────────────────────────────────────────────
 
-function TravelTimeSlider({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+/**
+ * Slider with debounced store update.
+ *
+ * - onChange: updates the local display value on every tick (no re-fetch)
+ * - onCommit: called only on mouseup/touchend — triggers the actual API fetch
+ * - step=15: snaps to 15, 30, 45 minutes only
+ */
+function TravelTimeSlider({
+  value,
+  onChange,
+  onCommit,
+}: {
+  value: number
+  onChange: (v: number) => void
+  onCommit: (v: number) => void
+}) {
   const min = 15
   const max = 45
   const pct = ((value - min) / (max - min)) * 100
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    onChange(Number(e.target.value))
-  }
 
   return (
     <div className="relative">
@@ -224,9 +307,11 @@ function TravelTimeSlider({ value, onChange }: { value: number; onChange: (v: nu
         type="range"
         min={min}
         max={max}
-        step={1}
+        step={15}
         value={value}
-        onChange={handleChange}
+        onChange={(e) => onChange(Number(e.target.value))}
+        onMouseUp={(e) => onCommit(Number((e.target as HTMLInputElement).value))}
+        onTouchEnd={(e) => onCommit(Number((e.target as HTMLInputElement).value))}
         className="w-full h-1.5 appearance-none rounded-full outline-none cursor-pointer"
         style={{
           background: `linear-gradient(to right, #f5a623 ${pct}%, #1e3358 ${pct}%)`,

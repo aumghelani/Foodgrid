@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Check, Plus, Clock, Truck } from 'lucide-react'
+import { Check, Loader2, Plus, Clock, Truck } from 'lucide-react'
 import { useMapStore } from '../../store/useMapStore'
-import { bostonCensusTracts, cityStats } from '../../data/censusTracts'
+import { BOSTON_TRACTS } from '../../data/censusTracts'
+import { useCityStats, useRunSimulation } from '../../api/hooks'
 import type { InterventionType } from '../../types'
 
 type Tab = 'overview' | 'equity' | 'simulate'
@@ -69,41 +70,40 @@ function TabPanel({ children }: { children: React.ReactNode }) {
 // ─── Overview Tab ─────────────────────────────────────────────────────────────
 
 function OverviewTab() {
-  const metrics = [
-    {
-      label: 'City Equity Score',
-      value: cityStats.equityScore,
-      display: cityStats.equityScore.toFixed(2),
-      color: '#eab308',
-      colorClass: 'text-yellow-400',
-      barClass: 'bg-yellow-400',
-    },
-    {
-      label: 'Transit Coverage',
-      value: cityStats.transitCoverage,
-      display: `${Math.round(cityStats.transitCoverage * 100)}%`,
-      color: '#22c55e',
-      colorClass: 'text-emerald-400',
-      barClass: 'bg-emerald-400',
-    },
-    {
-      label: 'High-Risk Tracts',
-      value: cityStats.highRiskTracts / cityStats.totalTracts,
-      display: `${cityStats.highRiskTracts} of ${cityStats.totalTracts}`,
-      color: '#ef4444',
-      colorClass: 'text-red-400',
-      barClass: 'bg-red-400',
-    },
-  ]
+  const { data: stats } = useCityStats()
 
-  // Sort tracts by risk descending
-  const sortedTracts = [...bostonCensusTracts.features]
-    .sort((a, b) => b.properties.foodRiskScore - a.properties.foodRiskScore)
+  const metrics = stats
+    ? [
+        {
+          label: 'City Equity Score',
+          value: stats.equity_score,
+          display: stats.equity_score.toFixed(2),
+          colorClass: 'text-yellow-400',
+          barClass: 'bg-yellow-400',
+        },
+        {
+          label: 'Transit Coverage',
+          value: stats.transit_coverage,
+          display: `${Math.round(stats.transit_coverage * 100)}%`,
+          colorClass: 'text-emerald-400',
+          barClass: 'bg-emerald-400',
+        },
+        {
+          label: 'High-Risk Tracts',
+          value: stats.high_risk_tracts / stats.total_tracts,
+          display: `${stats.high_risk_tracts} of ${stats.total_tracts}`,
+          colorClass: 'text-red-400',
+          barClass: 'bg-red-400',
+        },
+      ]
+    : []
+
+  const sortedTracts = [...BOSTON_TRACTS.features]
+    .sort((a, b) => b.properties.food_risk_score - a.properties.food_risk_score)
     .slice(0, 5)
 
   return (
     <div className="p-4 flex flex-col gap-4">
-      {/* Metric cards */}
       {metrics.map((m) => (
         <div key={m.label} className="bg-[#111f38] border border-[#1e3358] rounded-xl p-3.5">
           <div className="flex items-center justify-between mb-2">
@@ -121,35 +121,31 @@ function OverviewTab() {
         </div>
       ))}
 
-      {/* Highest Risk Tracts */}
       <div>
         <h3 className="font-display font-semibold text-sm text-white mb-2.5">Highest Risk Tracts</h3>
         <div className="flex flex-col gap-2">
           {sortedTracts.map((tract, i) => {
-            const riskPct = Math.round(tract.properties.foodRiskScore * 100)
+            const riskPct = Math.round(tract.properties.food_risk_score * 100)
             const riskColor =
-              tract.properties.foodRiskScore > 0.75
+              tract.properties.food_risk_score > 0.75
                 ? 'bg-red-500'
-                : tract.properties.foodRiskScore > 0.5
+                : tract.properties.food_risk_score > 0.5
                 ? 'bg-orange-400'
                 : 'bg-yellow-400'
             return (
-              <div key={tract.properties.tractId} className="flex items-center gap-2.5">
+              <div key={tract.properties.tract_id} className="flex items-center gap-2.5">
                 <span className="font-mono text-[10px] text-[#7a93b8]/60 w-4 text-right flex-shrink-0">
                   {i + 1}
                 </span>
                 <span className="font-sans text-xs text-white flex-1 truncate">
-                  {tract.properties.tractName}
+                  {tract.properties.tract_name}
                 </span>
                 <div className="flex items-center gap-1.5 flex-shrink-0">
                   <div className="w-20 h-1 bg-[#1e3358] rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full ${riskColor}`}
-                      style={{ width: `${riskPct}%` }}
-                    />
+                    <div className={`h-full rounded-full ${riskColor}`} style={{ width: `${riskPct}%` }} />
                   </div>
                   <span className="font-mono text-[10px] text-[#7a93b8] w-8 text-right">
-                    {(tract.properties.foodRiskScore).toFixed(2)}
+                    {tract.properties.food_risk_score.toFixed(2)}
                   </span>
                 </div>
               </div>
@@ -165,9 +161,9 @@ function OverviewTab() {
 
 function EquityTab() {
   const components = [
-    { name: 'Need', pct: 40, color: '#ef4444' },
-    { name: 'Supply', pct: 30, color: '#f97316' },
-    { name: 'Transit', pct: 20, color: '#3b82f6' },
+    { name: 'Need',          pct: 40, color: '#ef4444' },
+    { name: 'Supply',        pct: 30, color: '#f97316' },
+    { name: 'Transit',       pct: 20, color: '#3b82f6' },
     { name: 'Vulnerability', pct: 10, color: '#a855f7' },
   ]
 
@@ -175,7 +171,6 @@ function EquityTab() {
 
   return (
     <div className="p-4 flex flex-col gap-4">
-      {/* Equity Score formula */}
       <div>
         <p className="font-mono text-[10px] text-[#7a93b8] uppercase tracking-wider mb-2">Equity Score Formula</p>
         <pre className="bg-[#060e1c] border border-[#1e3358] rounded-lg p-3 text-[10px] font-mono text-emerald-300 leading-relaxed overflow-x-auto">
@@ -193,7 +188,6 @@ EquityScore = 1 − normalize(
         </pre>
       </div>
 
-      {/* Risk score component bars */}
       <div>
         <p className="font-mono text-[10px] text-[#7a93b8] uppercase tracking-wider mb-3">
           Score Component Weights
@@ -217,7 +211,6 @@ EquityScore = 1 − normalize(
         </div>
       </div>
 
-      {/* Demographic overlay filters */}
       <div>
         <p className="font-mono text-[10px] text-[#7a93b8] uppercase tracking-wider mb-2">Demographic Overlay</p>
         <div className="flex flex-wrap gap-1.5">
@@ -232,15 +225,14 @@ EquityScore = 1 − normalize(
         </div>
       </div>
 
-      {/* Data Sources */}
       <div className="border-t border-[#1e3358] pt-3">
         <p className="font-mono text-[10px] text-[#7a93b8] uppercase tracking-wider mb-2">Data Sources</p>
         <div className="flex flex-col gap-1">
           {[
             'US Census ACS 5-Year (2022)',
             'USDA Food Access Research Atlas',
-            'Boston Open Data Portal',
-            'MBTA GTFS v3 API',
+            'USDA LILA Food Desert Atlas',
+            'PolicyMap / BLS Food Spending',
             'Feeding America / GBFB 2023',
           ].map((src) => (
             <p key={src} className="font-mono text-[10px] text-[#7a93b8]/60">· {src}</p>
@@ -253,59 +245,39 @@ EquityScore = 1 − normalize(
 
 // ─── Simulate Tab ─────────────────────────────────────────────────────────────
 
-const INTERVENTIONS: {
-  type: InterventionType
-  label: string
-  icon: React.ReactNode
-  afterScore: number
-}[] = [
-  { type: 'pantry', label: 'Add Food Pantry', icon: <Plus className="w-3.5 h-3.5" />, afterScore: 0.71 },
-  { type: 'mobile', label: 'Add Mobile Pantry Stop', icon: <Truck className="w-3.5 h-3.5" />, afterScore: 0.64 },
-  { type: 'hours', label: 'Extend Existing Hours', icon: <Clock className="w-3.5 h-3.5" />, afterScore: 0.74 },
+const INTERVENTIONS: { type: InterventionType; label: string; icon: React.ReactNode }[] = [
+  { type: 'pantry', label: 'Add Food Pantry',        icon: <Plus className="w-3.5 h-3.5" /> },
+  { type: 'mobile', label: 'Add Mobile Pantry Stop',  icon: <Truck className="w-3.5 h-3.5" /> },
+  { type: 'hours',  label: 'Extend Existing Hours',   icon: <Clock className="w-3.5 h-3.5" /> },
 ]
 
 function SimulateTab() {
-  const { appliedInterventions, toggleIntervention } = useMapStore()
-  const { selectedTract } = useMapStore()
+  const { appliedInterventions, toggleIntervention, selectedTract } = useMapStore()
+  const sim = useRunSimulation()
 
-  const tractName = selectedTract?.tractName ?? 'Roxbury Census Tract 1'
-  const beforeScore = selectedTract?.foodRiskScore ?? 0.88
+  const tractName   = selectedTract?.tract_name    ?? 'Select a tract on the map'
+  const beforeScore = selectedTract?.food_risk_score ?? null
 
-  // Compute effective "after" score based on combined interventions
-  let afterScore: number | null = null
-  if (appliedInterventions.length > 0) {
-    if (appliedInterventions.includes('pantry') && appliedInterventions.includes('mobile')) {
-      afterScore = 0.58
-    } else if (appliedInterventions.includes('mobile')) {
-      afterScore = 0.64
-    } else if (appliedInterventions.includes('pantry')) {
-      afterScore = 0.71
-    } else if (appliedInterventions.includes('hours')) {
-      afterScore = 0.74
-    }
-  }
+  // Auto-run whenever the selected tract or interventions change
+  useEffect(() => {
+    if (!selectedTract?.tract_id || appliedInterventions.length === 0) return
+    sim.mutate({ tractId: selectedTract.tract_id, interventions: appliedInterventions })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTract?.tract_id, appliedInterventions.join(',')])
 
-  const equityDelta = afterScore !== null ? (0.61 + (beforeScore - (afterScore ?? beforeScore)) * 0.4).toFixed(2) : null
-  const householdsReached = appliedInterventions.length > 0
-    ? appliedInterventions.includes('pantry') && appliedInterventions.includes('mobile')
-      ? 6800
-      : appliedInterventions.includes('mobile')
-      ? 5100
-      : 4200
-    : 0
-  const transitDelta = appliedInterventions.length > 0
-    ? appliedInterventions.includes('mobile') ? 8 : 6
-    : 0
+  const afterScore        = sim.data?.after.food_risk_score ?? null
+  const equityBefore      = sim.data?.before.equity_score
+  const equityAfter       = sim.data?.after.equity_score
+  const transitDeltaPct   = sim.data ? Math.round(sim.data.delta.transit_coverage * 100) : 0
+  const householdsReached = sim.data?.households_reached ?? 0
 
   return (
     <div className="p-4 flex flex-col gap-4">
-      {/* Selected tract */}
       <div className="flex items-center gap-2">
         <div className="w-1.5 h-1.5 rounded-full bg-[#f5a623]" />
-        <span className="font-mono text-xs text-[#f5a623]">{tractName}</span>
+        <span className="font-mono text-xs text-[#f5a623] truncate">{tractName}</span>
       </div>
 
-      {/* Intervention buttons */}
       <div>
         <p className="font-mono text-[10px] text-[#7a93b8] uppercase tracking-wider mb-2.5">Policy Actions</p>
         <div className="flex flex-col gap-2">
@@ -330,7 +302,7 @@ function SimulateTab() {
         </div>
       </div>
 
-      {/* Before / After comparison */}
+      {/* Before / After */}
       <div className="bg-[#111f38] border border-[#1e3358] rounded-xl p-3.5">
         <p className="font-mono text-[10px] text-[#7a93b8] uppercase tracking-wider mb-3">
           Risk Score Projection
@@ -338,19 +310,23 @@ function SimulateTab() {
         <div className="flex items-center gap-4">
           <div className="flex-1 text-center">
             <p className="font-mono text-[10px] text-[#7a93b8] mb-1">Before</p>
-            <p className="font-display font-bold text-2xl text-red-400">{beforeScore.toFixed(2)}</p>
+            {beforeScore !== null
+              ? <p className="font-display font-bold text-2xl text-red-400">{beforeScore.toFixed(2)}</p>
+              : <p className="font-display font-bold text-2xl text-[#7a93b8]/40">—</p>}
           </div>
           <div className="text-[#7a93b8] text-lg font-light">→</div>
           <div className="flex-1 text-center">
             <p className="font-mono text-[10px] text-[#7a93b8] mb-1">After</p>
-            <AnimatedScore score={afterScore} />
+            {sim.isPending
+              ? <Loader2 className="w-6 h-6 text-[#7a93b8] animate-spin mx-auto" />
+              : <AnimatedScore score={afterScore} />}
           </div>
         </div>
       </div>
 
-      {/* Result summary card */}
+      {/* Impact summary */}
       <AnimatePresence>
-        {appliedInterventions.length > 0 && afterScore !== null && (
+        {sim.data && afterScore !== null && (
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
@@ -364,31 +340,36 @@ function SimulateTab() {
               <p className="font-sans text-xs text-emerald-300">
                 +{householdsReached.toLocaleString()} households newly reached
               </p>
-              <p className="font-sans text-xs text-emerald-300">
-                Equity Score: 0.61 → {equityDelta}
-              </p>
-              <p className="font-sans text-xs text-emerald-300">
-                Transit Coverage: +{transitDelta}%
-              </p>
+              {equityBefore !== undefined && equityAfter !== undefined && (
+                <p className="font-sans text-xs text-emerald-300">
+                  Equity Score: {equityBefore.toFixed(2)} → {equityAfter.toFixed(2)}
+                </p>
+              )}
+              {transitDeltaPct !== 0 && (
+                <p className="font-sans text-xs text-emerald-300">
+                  Transit Coverage: {transitDeltaPct > 0 ? '+' : ''}{transitDeltaPct}%
+                </p>
+              )}
             </div>
           </motion.div>
         )}
       </AnimatePresence>
+
+      {sim.isError && (
+        <p className="text-xs text-red-400/80 font-mono text-center">
+          Simulation unavailable — is the API running?
+        </p>
+      )}
     </div>
   )
 }
 
-// Animated score display
 function AnimatedScore({ score }: { score: number | null }) {
   const [displayed, setDisplayed] = useState<number | null>(null)
 
   useEffect(() => {
-    if (score === null) {
-      setDisplayed(null)
-      return
-    }
-    // Brief delay to feel like it's computing
-    const t = setTimeout(() => setDisplayed(score), 300)
+    if (score === null) { setDisplayed(null); return }
+    const t = setTimeout(() => setDisplayed(score), 250)
     return () => clearTimeout(t)
   }, [score])
 
