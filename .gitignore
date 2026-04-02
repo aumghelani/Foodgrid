@@ -16,3 +16,6 @@ backend/data/*.geojson
 
 # Keep the processed frontend GeoJSON (build artifact, should be committed)
 !src/data/boston_tracts.geojson
+
+# Claude Code
+.claude/
